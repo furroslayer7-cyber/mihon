@@ -17,6 +17,8 @@ import eu.kanade.tachiyomi.source.online.HttpSource
 import okhttp3.Response
 import org.jsoup.Jsoup
 import org.jsoup.nodes.Document
+import tachiyomi.core.common.preference.Preference
+import tachiyomi.core.common.preference.PreferenceStore
 import tachiyomi.domain.chapter.service.ChapterRecognition
 
 /**
@@ -45,19 +47,25 @@ import tachiyomi.domain.chapter.service.ChapterRecognition
 @SingleIn(AppScope::class)
 class LocalServerSource(
     private val context: Context,
+    preferenceStore: PreferenceStore,
 ) : HttpSource(), Source, UnmeteredSource {
 
     /**
-     * URL base del servidor HTTP que corre en la PC.
+     * Preferencia con la URL del servidor HTTP local de la PC.
+     * Se configura desde Ajustes > Avanzado > "Servidor local".
      *
-     * IMPORTANTE: cambia esto por la IP de tu PC en la red local.
-     * Ejemplos:
-     *   - "http://192.168.1.104:8080"
-     *   - "http://10.0.0.5:8000"
-     *
-     * Sin barra final.
+     * Se lee en vivo (getter) en [baseUrl], así que cambiarla desde la UI aplica
+     * sin reiniciar la app.
      */
-    override val baseUrl: String = "http://192.168.1.104:8080"
+    val serverUrlPref: Preference<String> =
+        preferenceStore.getString(URL_KEY, URL_DEFAULT)
+
+    /**
+     * URL base del servidor HTTP que corre en la PC. Lee el valor actual de
+     * [serverUrlPref] en cada acceso.
+     */
+    override val baseUrl: String
+        get() = serverUrlPref.get()
 
     override val name: String = "Servidor Local PC"
 
@@ -73,6 +81,12 @@ class LocalServerSource(
 
     companion object {
         const val ID = 9876543210L
+
+        // Clave y valor por defecto de la preferencia de URL del servidor.
+        // Se reutilizan desde LocalServerPreferences (módulo app) para que el
+        // ajuste de UI y el source lean/escriban la misma clave.
+        const val URL_KEY = "local_server_url"
+        const val URL_DEFAULT = "http://192.168.1.104:8080"
 
         private val IMAGE_EXTENSIONS = setOf("jpg", "jpeg", "png", "webp", "gif", "bmp")
         private val ARCHIVE_EXTENSIONS = setOf("cbz", "zip", "cbr", "rar", "epub")
@@ -196,7 +210,8 @@ class LocalServerSource(
             response.close()
             throw Exception("Error HTTP ${response.code} al obtener $url")
         }
-        val body = response.body?.string() ?: throw Exception("Respuesta vacía de $url")
+        val body = response.body.string()
+        if (body.isEmpty()) throw Exception("Respuesta vacía de $url")
         return Jsoup.parse(body, url)
     }
 
