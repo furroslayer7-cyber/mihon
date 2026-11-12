@@ -163,4 +163,65 @@ class LocalServerSource(
         val isArchive = ARCHIVE_EXTENSIONS.any { ext -> chapter.url.endsWith(".$ext", ignoreCase = true) }
 
         // Si es un .cbz/.zip/.epub, devolvemos una sola "página" con la URL directa.
-        // El
+        // El HttpPageLoader de Mihon descargará el archivo y el lector lo abrirá como
+        // un archive usando DownloadPageLoader tras la descarga.
+        if (isArchive) {
+            return listOf(Page(0, chapter.url, chapterUrl))
+        }
+
+        // Si es carpeta, listamos las imágenes que contiene
+        val doc = fetchHtml(chapterUrl)
+        return doc.select("a[href]")
+            .mapNotNull { a -> a.attr("href") to a.text() }
+            .filter { (href, _) ->
+                val ext = href.substringAfterLast('.', "").lowercase()
+                href.substringBeforeLast('.', "").isNotBlank() && ext in IMAGE_EXTENSIONS
+            }
+            .sortedBy { (href, _) -> href }
+            .mapIndexed { index, (href, _) ->
+                Page(index, chapter.url, absoluteUrl(chapterUrl, href))
+            }
+    }
+
+    override fun getFilterList(): FilterList = FilterList()
+
+    // ------------------------------------------------------------------
+    // Helpers
+    // ------------------------------------------------------------------
+
+    private suspend fun fetchHtml(url: String): Document {
+        val response: Response = client.newCall(GET(url, headers)).execute()
+        if (!response.isSuccessful) {
+            response.close()
+            throw Exception("Error HTTP ${response.code} al obtener $url")
+        }
+        val body = response.body?.string() ?: throw Exception("Respuesta vacía de $url")
+        return Jsoup.parse(body, url)
+    }
+
+    private fun absoluteUrl(base: String, href: String): String {
+        return if (href.startsWith("http")) {
+            href
+        } else if (href.startsWith("/")) {
+            baseUrl + href
+        } else {
+            base.trimEnd('/') + "/" + href.trimStart('/')
+        }
+    }
+
+    private fun toMangaEntry(href: String, text: String): MangaEntry? {
+        val name = text.trim().removeSuffix("/")
+        if (name.isEmpty() || name == ".." || name == "../") return null
+        if (href.isEmpty() || href == "/" || href == "../") return null
+        return MangaEntry(name = name, url = href)
+    }
+
+    private fun toChapterEntry(href: String, text: String): MangaEntry? {
+        val name = text.trim().removeSuffix("/")
+        if (name.isEmpty() || name == ".." || name == "../") return null
+        if (href.isEmpty() || href == "/" || href == "../") return null
+        return MangaEntry(name = name, url = href)
+    }
+
+    private data class MangaEntry(val name: String, val url: String)
+}
