@@ -15,6 +15,6 @@ dependencies {
     implementation(projects.domain)
     implementation(libs.metro.runtime)
     implementation(libs.jsoup)
-    implementation(libs.okhttp)
-    implementation(libs.kotlinx.coroutines)
+    implementation(libs.bundles.okhttp)
+    implementation(libs.bundles.kotlinx.coroutines)
 }
