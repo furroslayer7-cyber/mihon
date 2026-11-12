@@ -79,6 +79,7 @@ object SettingsAdvancedScreen : SearchableSettings {
         val crashLogUtil = remember { graph.crashLogUtil }
 
         return listOf(
+            getLocalServerGroup(),
             Preference.PreferenceItem.TextPreference(
                 title = stringResource(MR.strings.pref_dump_crash_logs),
                 subtitle = stringResource(MR.strings.pref_dump_crash_logs_summary),
@@ -129,6 +130,31 @@ object SettingsAdvancedScreen : SearchableSettings {
             getLibraryGroup(libraryPreferences = libraryPreferences),
             getReaderGroup(basePreferences = basePreferences),
             getExtensionsGroup(basePreferences = basePreferences),
+        )
+    }
+
+    @Composable
+    private fun getLocalServerGroup(): Preference.PreferenceGroup {
+        val context = LocalContext.current
+        val localServerPreferences = remember { context.appGraph.localServerPreferences }
+
+        return Preference.PreferenceGroup(
+            title = "Servidor local",
+            preferenceItems = listOf(
+                Preference.PreferenceItem.EditTextPreference(
+                    preference = localServerPreferences.serverUrl,
+                    title = "URL del servidor",
+                    onValueChanged = {
+                        val valid = (it.startsWith("http://") || it.startsWith("https://")) &&
+                            !it.endsWith("/") &&
+                            it.removePrefix("http://").removePrefix("https://").isNotEmpty()
+                        if (!valid) {
+                            context.toast("URL inválida: debe empezar con http:// o https:// y no terminar en /")
+                        }
+                        valid
+                    },
+                ),
+            ),
         )
     }
 
