@@ -15,6 +15,8 @@ import eu.kanade.tachiyomi.source.model.SManga
 import eu.kanade.tachiyomi.source.model.SMangaUpdate
 import eu.kanade.tachiyomi.source.online.HttpSource
 import okhttp3.Response
+import org.json.JSONArray
+import org.json.JSONObject
 import org.jsoup.Jsoup
 import org.jsoup.nodes.Document
 import tachiyomi.core.common.preference.Preference
@@ -33,6 +35,8 @@ import tachiyomi.domain.chapter.service.ChapterRecognition
  * Convención de carpetas esperada en el servidor:
  *
  *   /Berserk/                <- serie (carpeta)
+ *     cover.jpg              <- portada (opcional)
+ *     details.json           <- metadatos (opcional)
  *     /Capitulo 01/          <- capítulo (carpeta con imágenes sueltas)
  *       001.jpg
  *       002.jpg
@@ -90,6 +94,11 @@ class LocalServerSource(
 
         private val IMAGE_EXTENSIONS = setOf("jpg", "jpeg", "png", "webp", "gif", "bmp")
         private val ARCHIVE_EXTENSIONS = setOf("cbz", "zip", "cbr", "rar", "epub")
+
+        // Nombres de archivo de portada preferidos (en orden de prioridad).
+        private val COVER_NAMES = setOf(
+            "cover.jpg", "cover.png", "cover.webp", "folder.jpg", "poster.jpg",
+        )
     }
 
     // ------------------------------------------------------------------
@@ -121,6 +130,10 @@ class LocalServerSource(
             SManga.create().apply {
                 title = entry.name
                 url = entry.url
+                // Portada "adivinada": si hay cover.jpg en la carpeta de la serie,
+                // se muestra en el listado/biblioteca sin necesidad de abrir el manga.
+                // Se refina al cargar detalles (fillDetails).
+                thumbnail_url = baseUrl + "/" + entry.url + "cover.jpg"
             }
         }
 
@@ -138,9 +151,97 @@ class LocalServerSource(
         fetchChapters: Boolean,
     ): SMangaUpdate {
         val newChapters = if (fetchChapters) fetchServerChapterList(manga) else chapters
-        // Marcamos el manga como inicializado para que la UI no intente refrescar metadata infinitamente
-        if (fetchDetails) manga.initialized = true
+        // Rellenamos portada y metadatos leyendo la carpeta de la serie en el server.
+        if (fetchDetails) {
+            fillDetails(manga)
+            // Marcamos el manga como inicializado para que la UI no intente refrescar metadata infinitamente
+            manga.initialized = true
+        }
         return SMangaUpdate(manga, newChapters)
+    }
+
+    /**
+     * Rellena portada y metadatos del manga leyendo la carpeta de la serie en el server.
+     *
+     * - Portada: busca la primera imagen por prioridad (cover.jpg, cover.png, cover.webp,
+     *   folder.jpg, poster.jpg); si no hay, usa la primera imagen de la carpeta.
+     * - Metadatos: si existe un `details.json` en la carpeta, lo lee para title, author,
+     *   artist, description, genre y status.
+     */
+    private suspend fun fillDetails(manga: SManga) {
+        val seriesUrl = baseUrl + "/" + manga.url
+        val doc = fetchHtml(seriesUrl)
+        val links = doc.select("a[href]").map { it.attr("href") }
+
+        // Portada
+        val coverHref = links
+            .firstOrNull { href -> href.substringBeforeLast('?').lowercase() in COVER_NAMES }
+            ?: links.firstOrNull { href -> isImage(href) }
+        if (coverHref != null) {
+            manga.thumbnail_url = absoluteUrl(seriesUrl, coverHref)
+        }
+
+        // details.json (metadatos)
+        val detailsHref = links.firstOrNull {
+            it.substringBeforeLast('?').equals("details.json", ignoreCase = true)
+        }
+        if (detailsHref != null) {
+            val jsonUrl = absoluteUrl(seriesUrl, detailsHref)
+            try {
+                val json = fetchText(jsonUrl)
+                parseDetailsJson(json, manga)
+            } catch (_: Exception) {
+                // details.json ausente o malformado: ignoramos, dejamos lo que haya
+            }
+        }
+    }
+
+    private fun isImage(href: String): Boolean {
+        val ext = href.substringBeforeLast('?').substringAfterLast('.', "").lowercase()
+        return ext in IMAGE_EXTENSIONS
+    }
+
+    /** Descarga un archivo de texto (p. ej. details.json) sin parsear como HTML. */
+    private suspend fun fetchText(url: String): String {
+        val response: Response = client.newCall(GET(url, headers)).execute()
+        try {
+            if (!response.isSuccessful) throw Exception("Error HTTP ${response.code} al obtener $url")
+            return response.body.string()
+        } finally {
+            response.close()
+        }
+    }
+
+    private fun parseDetailsJson(json: String, manga: SManga) {
+        val obj = JSONObject(json)
+        obj.optString("title").takeIf { it.isNotBlank() }?.let { manga.title = it }
+        obj.optString("author").takeIf { it.isNotBlank() }?.let { manga.author = it }
+        obj.optString("artist").takeIf { it.isNotBlank() }?.let { manga.artist = it }
+        obj.optString("description").takeIf { it.isNotBlank() }?.let { manga.description = it }
+
+        val genres = obj.opt("genre")
+        when (genres) {
+            is JSONArray -> {
+                val list = (0 until genres.length()).mapNotNull { i ->
+                    genres.optString(i).takeIf { it.isNotBlank() }
+                }
+                if (list.isNotEmpty()) manga.genre = list.joinToString(", ")
+            }
+            is String -> if (genres.isNotBlank()) manga.genre = genres
+            else -> {}
+        }
+
+        obj.optString("status").takeIf { it.isNotBlank() }?.let { manga.status = parseStatus(it) }
+    }
+
+    private fun parseStatus(s: String): Int = when (s.lowercase()) {
+        "ongoing", "publishing" -> SManga.ONGOING
+        "completed", "finished" -> SManga.COMPLETED
+        "licensed" -> SManga.LICENSED
+        "publishing_finished" -> SManga.PUBLISHING_FINISHED
+        "cancelled" -> SManga.CANCELLED
+        "on_hiatus", "hiatus" -> SManga.ON_HIATUS
+        else -> SManga.UNKNOWN
     }
 
     // Renombrado para no colisionar con HttpSource.fetchChapterList (non-suspend, devuelve Observable)
