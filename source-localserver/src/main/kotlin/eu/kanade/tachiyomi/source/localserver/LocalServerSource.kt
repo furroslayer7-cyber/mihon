@@ -95,12 +95,20 @@ class LocalServerSource(
     ): MangasPage {
         val doc = fetchHtml(baseUrl)
 
-        val mangas = doc.select("a[href]")
+        val entries = doc.select("a[href]")
             .mapNotNull { a -> toMangaEntry(a.attr("href"), a.text()) }
             // Solo carpetas (las carpetas vienen con / final en el href)
             .filter { it.url.endsWith("/") }
-            .distinctBy { it.title }
-            .filter { query.isBlank() || it.title.contains(query, ignoreCase = true) }
+            .distinctBy { it.name }
+            .filter { query.isBlank() || it.name.contains(query, ignoreCase = true) }
+
+        // Convertimos MangaEntry -> SManga (lo que espera MangasPage)
+        val mangas = entries.map { entry ->
+            SManga.create().apply {
+                title = entry.name
+                url = entry.url
+            }
+        }
 
         return MangasPage(mangas, false)
     }
@@ -155,65 +163,4 @@ class LocalServerSource(
         val isArchive = ARCHIVE_EXTENSIONS.any { ext -> chapter.url.endsWith(".$ext", ignoreCase = true) }
 
         // Si es un .cbz/.zip/.epub, devolvemos una sola "página" con la URL directa.
-        // El HttpPageLoader de Mihon descargará el archivo y el lector lo abrirá como
-        // un archive usando DownloadPageLoader tras la descarga.
-        if (isArchive) {
-            return listOf(Page(0, chapter.url, chapterUrl))
-        }
-
-        // Si es carpeta, listamos las imágenes que contiene
-        val doc = fetchHtml(chapterUrl)
-        return doc.select("a[href]")
-            .mapNotNull { a -> a.attr("href") to a.text() }
-            .filter { (href, _) ->
-                val ext = href.substringAfterLast('.', "").lowercase()
-                href.substringBeforeLast('.', "").isNotBlank() && ext in IMAGE_EXTENSIONS
-            }
-            .sortedBy { (href, _) -> href }
-            .mapIndexed { index, (href, _) ->
-                Page(index, chapter.url, absoluteUrl(chapterUrl, href))
-            }
-    }
-
-    override fun getFilterList(): FilterList = FilterList()
-
-    // ------------------------------------------------------------------
-    // Helpers
-    // ------------------------------------------------------------------
-
-    private suspend fun fetchHtml(url: String): Document {
-        val response: Response = client.newCall(GET(url, headers)).execute()
-        if (!response.isSuccessful) {
-            response.close()
-            throw Exception("Error HTTP ${response.code} al obtener $url")
-        }
-        val body = response.body?.string() ?: throw Exception("Respuesta vacía de $url")
-        return Jsoup.parse(body, url)
-    }
-
-    private fun absoluteUrl(base: String, href: String): String {
-        return if (href.startsWith("http")) {
-            href
-        } else if (href.startsWith("/")) {
-            baseUrl + href
-        } else {
-            base.trimEnd('/') + "/" + href.trimStart('/')
-        }
-    }
-
-    private fun toMangaEntry(href: String, text: String): MangaEntry? {
-        val name = text.trim().removeSuffix("/")
-        if (name.isEmpty() || name == ".." || name == "../") return null
-        if (href.isEmpty() || href == "/" || href == "../") return null
-        return MangaEntry(name = name, url = href)
-    }
-
-    private fun toChapterEntry(href: String, text: String): MangaEntry? {
-        val name = text.trim().removeSuffix("/")
-        if (name.isEmpty() || name == ".." || name == "../") return null
-        if (href.isEmpty() || href == "/" || href == "../") return null
-        return MangaEntry(name = name, url = href)
-    }
-
-    private data class MangaEntry(val name: String, val url: String)
-}
+        // El
