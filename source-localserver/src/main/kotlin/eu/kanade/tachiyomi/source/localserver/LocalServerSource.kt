@@ -123,13 +123,14 @@ class LocalServerSource(
         fetchDetails: Boolean,
         fetchChapters: Boolean,
     ): SMangaUpdate {
-        val newChapters = if (fetchChapters) fetchChapterList(manga) else chapters
+        val newChapters = if (fetchChapters) fetchServerChapterList(manga) else chapters
         // Marcamos el manga como inicializado para que la UI no intente refrescar metadata infinitamente
         if (fetchDetails) manga.initialized = true
         return SMangaUpdate(manga, newChapters)
     }
 
-    private suspend fun fetchChapterList(manga: SManga): List<SChapter> {
+    // Renombrado para no colisionar con HttpSource.fetchChapterList (non-suspend, devuelve Observable)
+    private suspend fun fetchServerChapterList(manga: SManga): List<SChapter> {
         val doc = fetchHtml(baseUrl + "/" + manga.url)
 
         val chapters = doc.select("a[href]")
