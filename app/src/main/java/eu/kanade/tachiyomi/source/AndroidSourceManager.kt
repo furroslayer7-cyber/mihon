@@ -6,21 +6,7 @@ import dev.zacsweers.metro.Inject
 import dev.zacsweers.metro.SingleIn
 import eu.kanade.tachiyomi.data.download.DownloadManager
 import eu.kanade.tachiyomi.extension.ExtensionManager
-import eu.kanade.tachiyomi.source.localserver.LocalServerSource   // ← NUEVO: import
-import eu.kanade.tachiyomi.source.online.HttpSource
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.collectLatest
-package eu.kanade.tachiyomi.source
-
-import dev.zacsweers.metro.AppScope
-import dev.zacsweers.metro.ContributesBinding
-import dev.zacsweers.metro.Inject
-import dev.zacsweers.metro.SingleIn
-import eu.kanade.tachiyomi.data.download.DownloadManager
-import eu.kanade.tachiyomi.extension.ExtensionManager
-import eu.kanade.tachiyomi.source.localserver.LocalServerSource // ← NUEVO
+import eu.kanade.tachiyomi.source.localserver.LocalServerSource
 import eu.kanade.tachiyomi.source.online.HttpSource
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.Flow
@@ -45,7 +31,7 @@ class AndroidSourceManager(
     private val extensionManager: ExtensionManager,
     private val sourceRepository: StubSourceRepository,
     private val localSource: LocalSource,
-    private val localServerSource: LocalServerSource, // ← NUEVO
+    private val localServerSource: LocalServerSource,
     private val downloadManager: Lazy<DownloadManager>,
 ) : SourceManager {
 
@@ -67,7 +53,7 @@ class AndroidSourceManager(
                     val mutableMap = ConcurrentHashMap<Long, Source>(
                         mapOf(
                             LocalSource.ID to localSource,
-                            LocalServerSource.ID to localServerSource, // ← NUEVO
+                            LocalServerSource.ID to localServerSource,
                         ),
                     )
                     extensions.forEach { extension ->
